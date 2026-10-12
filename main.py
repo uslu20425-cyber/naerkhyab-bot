@@ -206,6 +206,72 @@ def clean_markup_text(text: str) -> str:
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
+# ---------- helpers for MOTC design ----------
+def to_bold_digits(s: str) -> str:
+    """تبدیل اعداد معمولی/فارسی به اعداد بولد ریاضی 𝟎-𝟗 برای دیزاین MOTC"""
+    if not s:
+        return s
+    # فارسی به انگلیسی
+    persian = '۰۱۲۳۴۵۶۷۸۹'
+    english = '0123456789'
+    s = s.translate(str.maketrans(persian, english))
+    # انگلیسی به بولد
+    bold = str.maketrans('0123456789', '𝟎𝟏𝟐𝟑𝟒𝟓𝟔𝟕𝟖𝟗')
+    return s.translate(bold)
+
+def to_bold_english(s: str) -> str:
+    """تبدیل حروف انگلیسی به حروف بولد ریاضی 𝐀-𝐙 برای دیزاین"""
+    # نگاشت A-Z, a-z به Mathematical Bold
+    res = []
+    for ch in s:
+        o = ord(ch)
+        if 65 <= o <= 90:  # A-Z
+            res.append(chr(0x1D400 + (o - 65)))
+        elif 97 <= o <= 122:  # a-z
+            res.append(chr(0x1D41A + (o - 97)))
+        else:
+            res.append(ch)
+    return ''.join(res)
+
+ENGLISH_NAME_MAP = {
+    'دوبی': 'DUBAI',
+    'ترکیه': 'TURKEY',
+    'تهران': 'TEHRAN',
+    'مشهد': 'MASHHAD',
+    'یوان چین': 'YUAN CHINA',
+    'یوان': 'YUAN',
+    'چین': 'CHINA',
+    'یورو به دالر': 'EURO',
+    'یورو': 'EURO',
+    'دالر': 'DOLLAR',
+    'دلار': 'DOLLAR',
+    'پوند': 'POUND',
+    'ریال': 'RIAL',
+    'لیر': 'LIRA',
+    'درهم': 'DIRHAM',
+    'ریال ایران': 'IRAN',
+    'افغانی': 'AFN',
+}
+
+def get_english_name(persian_name: str) -> str:
+    pn = persian_name.strip()
+    # جستجوی دقیق
+    if pn in ENGLISH_NAME_MAP:
+        return ENGLISH_NAME_MAP[pn]
+    # جستجوی جزئی - طولانی‌ترین کلید
+    for k in sorted(ENGLISH_NAME_MAP.keys(), key=len, reverse=True):
+        if k in pn:
+            return ENGLISH_NAME_MAP[k]
+    # اگر پیدا نشد، خود نام فارسی را به انگلیسی بولد تبدیل نکن، فقط بزرگ کن
+    # برای دیزاین، اگر انگلیسی پیدا نشد، از خود فارسی استفاده می‌کنیم ولی بولد نمی‌کنیم
+    # تلاش برای تبدیل حروف فارسی به انگلیسی؟ نه، فقط خود فارسی را برمی‌گردانیم
+    return pn.upper() if re.match(r'^[A-Za-z ]+$', pn) else pn
+
+MOTC_HEADER = "╔══════════════════════╗\n　　 💎 𝐌𝐎𝐓𝐂 💎\n　　𝑳𝑰𝑽𝑬 𝑴𝑨𝑹𝑲𝑬𝑻 𝑹𝑨𝑻𝑬𝑺\n　　 نرخ لحظه‌ای معاملات\n╚══════════════════════╝"
+MOTC_FOOTER = "━━━━━━━━━━━━━━━━━━\n　　 𝐌𝐎𝐓𝐂 　 𝑻𝒓𝒖𝒔𝒕 • 𝑻𝒓𝒂𝒅𝒆 • 𝑪𝒐𝒏𝒏𝒆𝒄𝒕"
+MOTC_SEPARATOR = "━━━━━━━━━━━━━━━━━━"
+MOTC_LAFZI_HEADER = "📍 ◆ 𝐋𝐎𝐂𝐀𝐋 𝐑𝐀𝐓𝐄𝐒 　　 نرخ‌های لفظی"
+
 # ---------- فرمت‌دهی نرخ عادی ----------
 def format_rate_entry(rest: str, flag: str, original_line: str):
     """
@@ -266,16 +332,25 @@ def format_rate_entry(rest: str, flag: str, original_line: str):
     if not name_clean:
         name_clean = "نامشخص"
 
-    # ساخت خروجی HTML
+    # ساخت خروجی MOTC - دیزاین جدید
     flag_str = f"{flag} " if flag and flag.strip() else ""
-    # escape نام
-    name_escaped = html.escape(name_clean)
-    parts = [f"{flag_str}<b>{name_escaped}</b>"]
-    if buy:
-        parts.append(f"🟢 خرید: {html.escape(buy)}")
-    if sell:
-        parts.append(f"🔴 فروش: {html.escape(sell)}")
-    return " ".join(parts)
+    english = get_english_name(name_clean)
+    # اگر انگلیسی هنوز فارسی دارد، یعنی نگاشت پیدا نشده - فقط از فارسی استفاده کن
+    if re.search(r'[\u0600-\u06FF]', english):
+        base = f"{flag_str}◆ {name_clean}"
+    else:
+        eng_bold = to_bold_english(english)
+        base = f"{flag_str}◆ {eng_bold} | {name_clean}"
+    buy_b = to_bold_digits(buy) if buy else ""
+    sell_b = to_bold_digits(sell) if sell else ""
+    if buy and sell:
+        return f"{base} 🟢 خرید　│　{buy_b} 🔴 فروش　│　{sell_b}"
+    elif buy:
+        return f"{base} 🟢 خرید　│　{buy_b}"
+    elif sell:
+        return f"{base} 🔴 فروش　│　{sell_b}"
+    else:
+        return base
 
 
 def format_lafzi_entry(original_line: str, flag: str, rest: str):
@@ -348,32 +423,40 @@ def format_lafzi_entry(original_line: str, flag: str, rest: str):
         fallback = re.sub(r'\s+', ' ', fallback).strip()
         display_cities = fallback if fallback else "نامشخص"
 
-    range_str = f"{num1} تا {num2}" if num2 else f"{num1}"
+    # --- MOTC دیزاین برای لفظی ---
+    num1_b = to_bold_digits(num1)
+    num2_b = to_bold_digits(num2) if num2 else None
+    # تبدیل ↔ به ⇄ با فاصله عریض
+    if "↔" in display_cities:
+        parts = display_cities.split("↔")
+        if len(parts) == 2:
+            display_cities_motc = f"{parts[0].strip()}　⇄　{parts[1].strip()}"
+        else:
+            display_cities_motc = display_cities
+    else:
+        display_cities_motc = display_cities
+    range_b = f"{num1_b} — {num2_b}" if num2_b else f"{num1_b}"
 
     if better_city:
-        # اطمینان از اینکه better_city تمیز است
-        better_city_clean = re.sub(r'[^\u0600-\u06FF]', '', better_city)
-        better_city_clean = better_city_clean.strip()
+        better_city_clean = re.sub(r'[^\u0600-\u06FF]', '', better_city).strip()
         if better_city_clean:
-            return f"{display_cities}: {range_str}؛ {html.escape(better_city_clean)} بهتر است."
-    # اگر بهتر است داشت ولی شهر پیدا نشد
+            return f"🇦🇫 {display_cities_motc} 💱 {range_b} 🔹 {better_city_clean} بهتر است."
+        else:
+            return f"🇦🇫 {display_cities_motc} 💱 {range_b} 🔹 بهتر است."
     if 'بهتر است' in line and not better_city:
-        # سعی کن بعد از num2 را بگیری
         if num2 and num2 in line:
             after = line.split(num2, 1)[1]
             after_clean = re.sub(r'[^\u0600-\u06FF\s]', ' ', after)
             after_clean = after_clean.replace('لفظی', ' ').replace('بهتر است', ' بهتر است ')
             after_clean = re.sub(r'\s+', ' ', after_clean).strip()
             if after_clean:
-                # اگر after_clean دقیقاً "بهتر است" بود، فقط همان
                 if after_clean == "بهتر است":
-                    return f"{display_cities}: {range_str}؛ بهتر است."
-                # اگر شامل شهر + بهتر است بود
+                    return f"🇦🇫 {display_cities_motc} 💱 {range_b} 🔹 بهتر است."
                 if 'بهتر است' in after_clean:
-                    return f"{display_cities}: {range_str}؛ {html.escape(after_clean)}"
-                return f"{display_cities}: {range_str}؛ {html.escape(after_clean)} بهتر است."
-        return f"{display_cities}: {range_str}؛ بهتر است."
-    return f"{display_cities}: {range_str}"
+                    return f"🇦🇫 {display_cities_motc} 💱 {range_b} 🔹 {html.escape(after_clean)}"
+                return f"🇦🇫 {display_cities_motc} 💱 {range_b} 🔹 {html.escape(after_clean)} بهتر است."
+        return f"🇦🇫 {display_cities_motc} 💱 {range_b} 🔹 بهتر است."
+    return f"🇦🇫 {display_cities_motc} 💱 {range_b}"
 
 
 def parse_whatsapp_text(raw_text: str):
@@ -480,11 +563,11 @@ def parse_whatsapp_text(raw_text: str):
                     ambiguous.append(entry)
 
     output_lines = []
-    output_lines.append("💱 <b>نرخ لحظه‌ای</b>")
+    output_lines.append(MOTC_HEADER)
     output_lines.append("")
 
-    # فرمت نرخ‌های عادی به ترتیب ظهور
-    for entry in standard_rates:
+    # فرمت نرخ‌های عادی به ترتیب ظهور - دیزاین MOTC با جداکننده
+    for idx, entry in enumerate(standard_rates):
         flag, rest = extract_leading_emojis(entry)
         formatted = format_rate_entry(rest, flag, entry)
         if formatted:
@@ -494,66 +577,73 @@ def parse_whatsapp_text(raw_text: str):
             if cleaned:
                 output_lines.append(html.escape(cleaned))
                 warnings.append(f"⚠️ نرخ نامشخص حفظ شد: «{cleaned[:50]}»")
+        # جداکننده بین نرخ‌ها
+        if idx < len(standard_rates) - 1 or lafzi_rates:
+            output_lines.append("")
+            output_lines.append(MOTC_SEPARATOR)
+            output_lines.append("")
 
-    # لفظی‌ها
+    # لفظی‌ها - دیزاین MOTC
     if lafzi_rates:
+        output_lines.append(MOTC_LAFZI_HEADER)
         output_lines.append("")
-        output_lines.append("📍 <b>نرخ‌های لفظی</b>")
-        output_lines.append("")
-        for entry in lafzi_rates:
+        for idx, entry in enumerate(lafzi_rates):
             flag, rest = extract_leading_emojis(entry)
             formatted = format_lafzi_entry(entry, flag, rest)
             if formatted:
-                # لفظی‌ها معمولاً بدون فلگ هستند، اما اگر فلگ داشتند حفظ کن
-                if flag:
-                    formatted = f"{flag} {formatted}"
-                output_lines.append(html.escape(formatted) if "<b>" not in formatted else formatted)  # formatted لفظی شامل html نیست
-                # چون formatted لفظی شامل html.escape نشده برای شهرها، ولی ما بهتر است escape کنیم
-                # در تابع لفظی قبلاً escape کردیم برای better_city
-                # پس همین را اضافه کن
-                # اگر formatted شامل تگ نبود، escape شده، درست است
-                # برای جلوگیری از دوبار escape، چک کن
-                pass
+                # format_lafzi_entry خودش 🇦🇫 دارد، flag اضافی لازم نیست
+                output_lines.append(formatted)
             else:
                 cleaned = clean_markup_text(entry)
                 if cleaned:
                     output_lines.append(html.escape(cleaned))
                     warnings.append(f"⚠️ لفظی نامشخص حفظ شد: «{cleaned[:50]}»")
-        # بازنویسی دقیق برای لفظی‌ها: تابع لفظی خروجی‌اش plain است، باید html.escape کنیم اما شهرها را نگه داریم
-        # پس بعد از حلقه، لفظی‌ها را دوباره escape درست می‌کنیم
-        # در واقع formatted_lafzi شامل کاراکترهای فارسی و "↔ ؛" است، نیازی به escape ندارد جز &
-        # پس درست است
+            if idx < len(lafzi_rates) - 1:
+                output_lines.append("")
+                output_lines.append(MOTC_SEPARATOR)
+                output_lines.append("")
+        output_lines.append("")
+        output_lines.append(MOTC_FOOTER)
+    else:
+        # اگر لفظی نبود، فقط فوتر بعد از نرخ‌ها
+        if standard_rates:
+            output_lines.append(MOTC_FOOTER)
 
-    # اما لفظی formatted ها در بالا دوبار اضافه شدند با اشتباه منطقی؛ آنها را درست می‌کنیم:
-    # برای اصلاح، باید خروجی لفظی را بدون html دوباره بسازیم
-    # ساده: اگر خروجی لفظی html نداشت، فقط همان را اضافه کن (قبلاً اضافه شده)
-    # پس نیازی به تغییر نیست
-
-    # مبهم‌ها
+    # مبهم‌ها - اگر بود، قبل از فوتر اضافه کن (اما فوتر قبلاً اضافه شده، پس مبهم را قبل از فوتر بگذار)
+    # برای سادگی، مبهم‌ها را قبل از فوتر نهایی نگه می‌داریم - اگر مبهم داشتیم و فوتر اضافه شده، یک بار دیگر فوتر را حفظ می‌کنیم
     if ambiguous:
+        # اگر فوتر قبلاً اضافه شده، آن را موقتاً بردار
+        has_footer = output_lines and output_lines[-1] == MOTC_FOOTER
+        if has_footer:
+            output_lines.pop()
+            # همچنین خط خالی قبلش
+            if output_lines and output_lines[-1] == "":
+                output_lines.pop()
         for entry in ambiguous:
             cleaned = clean_markup_text(entry)
-            # اگر cleaned دقیقاً همان "نرخیاب دقیق" بود که جا مانده، رد کن
             if 'نرخیاب' in cleaned:
                 continue
             if len(cleaned.strip()) < 2:
                 continue
-            # جلوگیری از تکرار چیزی که قبلاً به عنوان لفظی/عادی پردازش شده
-            # فقط اگر entry در دو لیست قبلی نبود
             if entry in standard_rates or entry in lafzi_rates:
                 continue
             output_lines.append(html.escape(cleaned))
             warnings.append(f"⚠️ متن مبهم حفظ شد: «{cleaned[:50]}»")
+        # دوباره فوتر
+        output_lines.append("")
+        output_lines.append(MOTC_FOOTER)
 
     # اگر هیچ نرخ معتبری نبود
     if not standard_rates and not lafzi_rates and not ambiguous:
         warnings.append("⚠️ هیچ نرخ معتبری تشخیص داده نشد؛ متن اصلی به صورت تمیز برگردانده شد.")
         fallback_lines = [clean_markup_text(x) for x in intermediate if clean_markup_text(x)]
         if fallback_lines:
-            output_lines = ["💱 <b>نرخ لحظه‌ای</b>", ""]
+            output_lines = [MOTC_HEADER, ""]
             output_lines.extend([html.escape(x) for x in fallback_lines])
+            output_lines.append("")
+            output_lines.append(MOTC_FOOTER)
         else:
-            output_lines = ["💱 <b>نرخ لحظه‌ای</b>", "", html.escape(clean_markup_text(raw_text)[:1000])]
+            output_lines = [MOTC_HEADER, "", html.escape(clean_markup_text(raw_text)[:1000]), "", MOTC_FOOTER]
 
     formatted_text = "\n".join(output_lines)
     formatted_text = re.sub(r'\n{3,}', '\n\n', formatted_text).strip()
@@ -875,12 +965,9 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if editing_state.get(uid):
         editing_state[uid] = False
         # کاربر متن ویرایش‌شده را فرستاده؛ آن را به عنوان نسخه نهایی در نظر بگیر
-        # اگر متن با 💱 شروع نشد، عنوان را اضافه کن
         edited = text.strip()
-        if not edited.startswith("💱"):
-            # اگر کاربر فقط نرخ‌ها را فرستاد بدون عنوان، عنوان را اضافه کن
-            if "نرخ لحظه‌ای" not in edited[:50]:
-                edited = "💱 <b>نرخ لحظه‌ای</b>\n\n" + edited
+        if "نرخ لحظه‌ای" not in edited[:150] and "MOTC" not in edited and "╔" not in edited[:20]:
+            edited = MOTC_HEADER + "\n\n" + edited
         # ذخیره به عنوان pending جدید
         pending_messages[uid] = {
             "raw": pending_messages.get(uid, {}).get("raw", "") + "\n[edited]",
